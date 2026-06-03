@@ -7,7 +7,7 @@ FROM condaforge/miniforge3:latest
 
 LABEL maintainer="Samuele Cancellieri <samuelc@uio.no>" \
         description="GeneCircuitry – transcriptional regulatory network analysis" \
-        version="0.1.6"
+        version="0.2.1"
 
 
 RUN apt-get update && \
