@@ -463,3 +463,85 @@ def update_config(**kwargs):
             print(f"Updated {key} = {value}")
         else:
             print(f"Warning: {key} is not a valid configuration parameter")
+
+
+def load_config_file(path: str) -> dict:
+    """
+    Load configuration parameters from a YAML or JSON file and apply them.
+
+    Keys in the file must match existing config parameter names (e.g.
+    ``QC_MIN_GENES``, ``LEIDEN_RESOLUTION``).  Unknown keys raise a
+    ``ValueError`` so typos are caught early.
+
+    CLI arguments always take precedence over values set by this function
+    when the pipeline is run via the command line.
+
+    Parameters
+    ----------
+    path : str
+        Path to a ``.yaml`` / ``.yml`` or ``.json`` config file.
+
+    Returns
+    -------
+    dict
+        The parameters that were loaded and applied.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *path* does not exist.
+    ValueError
+        If the file format is unsupported or contains unknown parameter names.
+    ImportError
+        If a YAML file is provided but ``pyyaml`` is not installed.
+
+    Examples
+    --------
+    >>> from genecircuitry.config import load_config_file
+    >>> load_config_file("my_run.yaml")
+    {'QC_MIN_GENES': 200, 'LEIDEN_RESOLUTION': 0.5}
+    """
+    import json as _json
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext in (".yaml", ".yml"):
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError(
+                "pyyaml is required to load YAML config files. "
+                "Install it with: pip install pyyaml"
+            )
+        with open(path) as f:
+            params = yaml.safe_load(f)
+    elif ext == ".json":
+        with open(path) as f:
+            params = _json.load(f)
+    else:
+        raise ValueError(
+            f"Unsupported config file format: {ext!r}. Use .yaml, .yml, or .json"
+        )
+
+    if params is None:
+        return {}
+
+    if not isinstance(params, dict):
+        raise ValueError(
+            "Config file must contain a mapping of parameter names to values"
+        )
+
+    valid_keys = set(get_config().keys())
+    unknown = set(params.keys()) - valid_keys
+    if unknown:
+        raise ValueError(
+            f"Unknown config parameters: {sorted(unknown)}.\n"
+            f"Valid parameters are listed in genecircuitry/config.py or via "
+            f"genecircuitry.config.get_config()."
+        )
+
+    update_config(**params)
+    return params

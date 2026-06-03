@@ -1662,6 +1662,15 @@ Examples:
         default="test_run",
         help="Name of the analysis run (optional)",
     )
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        default=None,
+        help="Path to a YAML or JSON config file with parameter overrides "
+        "(e.g. QC_MIN_GENES, LEIDEN_RESOLUTION). "
+        "Explicit CLI arguments take precedence over values in this file.",
+    )
 
     # Analysis parameters
     parser.add_argument(
@@ -1798,6 +1807,12 @@ Examples:
 
     args = parser.parse_args()
 
+    # Capture which args were explicitly provided by the user (vs. left at defaults).
+    # Used later so that config-file values are not silently overridden by argparse
+    # defaults for params that have a corresponding CLI flag.
+    _original_defaults = {k: parser.get_default(k) for k in vars(args)}
+    _explicit_args = {k for k, v in vars(args).items() if v != _original_defaults[k]}
+
     # Print header
     print("\n" + "=" * 70)
     print("GeneCircuitry Complete Analysis Pipeline")
@@ -1809,6 +1824,16 @@ Examples:
     print(f"\n{'='*70}")
     print("STEP 0: Configuration Setup")
     print(f"{'='*70}")
+
+    # Load config file BEFORE directory setup so all subsequent calls see updated values.
+    # CLI arguments that were explicitly provided will override the file below.
+    if args.config:
+        try:
+            loaded = config.load_config_file(args.config)
+            print(f"  Loaded {len(loaded)} parameter(s) from config file: {args.config}")
+        except (FileNotFoundError, ValueError, ImportError) as e:
+            print(f"\nError loading config file: {e}")
+            return 1
 
     # Create directories
     setup_directories(
@@ -1825,24 +1850,34 @@ Examples:
         {"output_dir": args.output, "random_seed": args.seed, "n_jobs": args.n_jobs},
     )
 
-    # Set random seed and scanpy settings
-    set_random_seed(args.seed)
+    # Set random seed: use explicit CLI value, otherwise respect any value from config file
+    _seed = args.seed if "seed" in _explicit_args else config.RANDOM_SEED
+    set_random_seed(_seed)
     set_scanpy_settings()
 
     sc.settings.logfile = os.path.join(args.output, "logs", "scanpy_log.txt")
 
-    # Update GeneCircuitry configuration
-    config.update_config(
+    # Update GeneCircuitry configuration.
+    # Output/figures dirs always come from CLI.  QC and compute params only
+    # override the config file when the user explicitly passed the CLI flag.
+    _config_overrides = dict(
         OUTPUT_DIR=args.output,
         FIGURES_DIR=os.path.join(args.output, "figures"),
         FIGURES_DIR_QC=os.path.join(args.output, "figures", "qc"),
         FIGURES_DIR_GRN=os.path.join(args.output, "figures", "grn"),
         FIGURES_DIR_HOTSPOT=os.path.join(args.output, "figures", "hotspot"),
-        GRN_N_JOBS=args.n_jobs,
-        HOTSPOT_N_JOBS=args.n_jobs,
-        QC_MIN_GENES=args.min_genes,
-        QC_MIN_COUNTS=args.min_counts,
     )
+    if "n_jobs" in _explicit_args:
+        _config_overrides.update(
+            GRN_N_JOBS=args.n_jobs,
+            HOTSPOT_N_JOBS=args.n_jobs,
+            N_JOBS=args.n_jobs,
+        )
+    if "min_genes" in _explicit_args:
+        _config_overrides["QC_MIN_GENES"] = args.min_genes
+    if "min_counts" in _explicit_args:
+        _config_overrides["QC_MIN_COUNTS"] = args.min_counts
+    config.update_config(**_config_overrides)
 
     print(f"Random seed: {args.seed}")
     print(f"Output directory: {args.output}")
