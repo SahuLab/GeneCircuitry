@@ -1807,11 +1807,27 @@ Examples:
 
     args = parser.parse_args()
 
-    # Capture which args were explicitly provided by the user (vs. left at defaults).
-    # Used later so that config-file values are not silently overridden by argparse
-    # defaults for params that have a corresponding CLI flag.
-    _original_defaults = {k: parser.get_default(k) for k in vars(args)}
-    _explicit_args = {k for k, v in vars(args).items() if v != _original_defaults[k]}
+    # Capture which args were explicitly provided by the user on the command line.
+    # We do this by parsing a second time with all defaults set to a sentinel so
+    # that only arguments that actually appeared on sys.argv get a non-sentinel
+    # value — avoiding the false-negative when a user passes a value that equals
+    # the default (e.g. --seed 42 when the default is already 42).
+    _sentinel = object()
+    _sentinel_parser = argparse.ArgumentParser(add_help=False)
+    for action in parser._actions:
+        if action.dest == "help" or not action.option_strings:
+            continue
+        _sentinel_parser.add_argument(
+            *action.option_strings,
+            dest=action.dest,
+            nargs=action.nargs if action.nargs else (None if action.const is None else "?"),
+            default=_sentinel,
+            const=action.const,
+        )
+    _sentinel_args, _ = _sentinel_parser.parse_known_args()
+    _explicit_args = {
+        k for k, v in vars(_sentinel_args).items() if v is not _sentinel
+    }
 
     # Print header
     print("\n" + "=" * 70)
@@ -1842,6 +1858,10 @@ Examples:
         debug=args.debug,
     )
 
+    # Resolve seed now (after config file is loaded) so logging and setup both use
+    # the same value: explicit CLI flag wins, otherwise fall back to config file value.
+    args.seed = args.seed if "seed" in _explicit_args else config.RANDOM_SEED
+
     # Initialize logging system
     setup_logging(args.output)
     log_step(
@@ -1850,9 +1870,7 @@ Examples:
         {"output_dir": args.output, "random_seed": args.seed, "n_jobs": args.n_jobs},
     )
 
-    # Set random seed: use explicit CLI value, otherwise respect any value from config file
-    _seed = args.seed if "seed" in _explicit_args else config.RANDOM_SEED
-    set_random_seed(_seed)
+    set_random_seed(args.seed)
     set_scanpy_settings()
 
     sc.settings.logfile = os.path.join(args.output, "logs", "scanpy_log.txt")
