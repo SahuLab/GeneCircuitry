@@ -1,6 +1,6 @@
 [workspace]
 name = "genecircuitry"
-version = "0.1.9"
+version = "0.2.1"
 description = "A package for transcriptional regulatory network analysis"
 authors = ["Samuele Cancellieri <samuelc@uio.no>"]
 channels = ["conda-forge", "bioconda"]
