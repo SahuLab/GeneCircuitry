@@ -58,11 +58,15 @@ def run_step_new_analysis(self, adata, log_dir=None):
 ### 3. Logging Pattern
 
 ```python
-from genecircuitry.pipeline import log_step, log_error
-
+# In PipelineController methods only — log_step lives in controller.py:
+from genecircuitry.pipeline import log_step
 log_step("MyStep", "STARTED", {"n_cells": adata.n_obs})
 log_step("MyStep", "COMPLETED", {"result_count": len(results)})
-log_error("MyStep", exception)  # Logs to error.log with traceback
+
+# In all other submodules — use logging_utils (safe before setup_logging):
+from genecircuitry.logging_utils import log_error, log_warning
+log_error("MyModule", exception)   # Logs to error.log with traceback
+log_warning("MyModule", "message")  # Logs to pipeline.log
 ```
 
 ### 4. Function Signatures with Config Defaults
@@ -79,6 +83,8 @@ def my_function(
 ### 5. Optional Dependency Pattern
 
 `celloracle_processing` and `hotspot_processing` use optional dependencies. `genecircuitry/__init__.py` wraps them in `try/except`; access via `genecircuitry.celloracle_processing` (may be `None` if not installed). New optional-dep modules must follow the same pattern.
+
+Install optional groups: `pip install genecircuitry[grn]` (CellOracle), `pip install genecircuitry[hotspot]`, `pip install genecircuitry[all]`.
 
 ### 6. Plotting — Use `genecircuitry/plotting/` Subpackage
 
@@ -104,12 +110,18 @@ python -m genecircuitry.pipeline --cluster-key-stratification celltype --paralle
 
 **Available step names:** `load`, `preprocessing`, `stratification`, `clustering`, `celloracle`, `hotspot`, `grn_analysis`, `summary`
 
-### Testing
+### Development Commands (preferred: `pixi`)
 
 ```bash
-pytest tests/                    # Run all tests
-pytest tests/test_config.py     # Config tests specifically
+pixi run -e dev test        # pytest tests/ -v
+pixi run -e dev lint        # flake8 genecircuitry/
+pixi run -e dev format      # black genecircuitry/
+pixi run -e dev typecheck   # mypy genecircuitry/
 ```
+
+Direct fallback: `pytest tests/ -v`
+
+**Python version**: `>=3.9, <3.11` only.
 
 When adding new config parameters, add corresponding tests to `tests/test_config.py`.
 
@@ -157,6 +169,28 @@ outputs = generate_report(
 2. Add to `get_config()` return dict in same file
 3. Add test in `tests/test_config.py`
 
+## Checkpoint System
+
+Checkpoints skip completed steps on re-runs. Stored in `output/logs/<step_name>.checkpoint` (JSON). Key functions in `controller.py`:
+
+- `compute_input_hash(input_path, **params)` — MD5 of file path + mtime + params
+- `write_checkpoint(log_dir, step_name, input_hash, **metadata)` — saves checkpoint
+- `check_checkpoint(log_dir, step_name, input_hash)` — returns `True` to skip step
+
+See [docs/checkpoints.md](../docs/checkpoints.md) for full details.
+
+## Where to Make Changes
+
+| Task                                | Location                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| Add/change pipeline parameter       | `genecircuitry/config.py` + `get_config()` + `tests/test_config.py`       |
+| Add pipeline step                   | `PipelineController` in `genecircuitry/pipeline/controller.py`            |
+| Add a plot                          | `genecircuitry/plotting/<module>.py` + export in `plotting/__init__.py`   |
+| Add a report section                | `genecircuitry/reporting/sections.py` + export in `reporting/__init__.py` |
+| Log from any submodule              | `from genecircuitry.logging_utils import log_error, log_warning`          |
+| Log step progress (controller only) | `from genecircuitry.pipeline import log_step`                             |
+
 ## Known Remaining Issues (see `RESTRUCTURING_PLAN.md`)
 
 - `pyproject.toml` optional-dep groups (`enrichment`, `atac`) are not pinned — `gseapy>=1.0.0`, `genomepy`, `gimmemotifs` are in optional extras only, not core deps
+- PDF generation requires `weasyprint` which depends on system-level `pango` — use `pixi` env or install separately
